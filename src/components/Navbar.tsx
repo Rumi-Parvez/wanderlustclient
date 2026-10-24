@@ -6,7 +6,7 @@ const links = [
   { label: "Home", href: "/" },
   { label: "Destinations", href: "/all-destinations" },
   { label: "My Bookings", href: "/my-bookings" },
-  { label: "Admin", href: "/add-new-travels" },
+  { label: "Admin", href: "/admin" },
 ];
 
 export function Navbar() {

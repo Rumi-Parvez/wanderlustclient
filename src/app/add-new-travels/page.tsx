@@ -91,7 +91,7 @@ export default function AddNewTravelsPage() {
         );
       }
 
-      const data = await res.json();
+      await res.json();
 
       // Save locally only after the API request succeeds.
       const existing = JSON.parse(
