@@ -4,12 +4,21 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FaGoogle } from "react-icons/fa6";
-import { LuLock, LuMail, LuUserRound } from "react-icons/lu";
+import { 
+  LuLock, 
+  LuMail, 
+  LuUserRound, 
+  LuEye, 
+  LuEyeOff, 
+  LuLoader 
+} from "react-icons/lu";
 import { toast } from "react-toastify";
+
 import { Input } from "@/components/ui/input";
+import { authClient } from "@/lib/auth-client";
 
 const inputClasses =
-  "h-10 rounded-[4px] border-0 bg-gray-100 px-4 pl-10 text-sm shadow-none";
+  "h-10 rounded-[4px] border-0 bg-gray-100 px-4 pl-10 pr-10 text-sm shadow-none disabled:opacity-60";
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -20,6 +29,8 @@ export default function SignUpPage() {
     confirmPassword: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   function update(key: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -36,49 +47,61 @@ export default function SignUpPage() {
     }
 
     if (form.password.length < 8) {
-      toast.error("Password must be at least 8 characters.");
-      return;
-    }
-
-    const apiUrl = process.env.NEXT_PUBLIC_SERVER;
-    if (!apiUrl) {
-      toast.error("Server URL is missing!");
+      toast.error("Password must be at least 8 characters long.");
       return;
     }
 
     setSubmitting(true);
 
     try {
-      const res = await fetch(`${apiUrl}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.fullName,
+      const { error } = await authClient.signUp.email(
+        {
           email: form.email,
           password: form.password,
-        }),
-      });
+          name: form.fullName,
+          callbackURL: "/",
+        },
+        {
+          onRequest: () => {
+            setSubmitting(true);
+          },
+          onSuccess: () => {
+            toast.success("Account created successfully!");
+            router.push("/");
+          },
+          onError: (ctx) => {
+            toast.error(ctx.error.message || "Failed to create account.");
+            setSubmitting(false);
+          },
+        }
+      );
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Registration failed (${res.status}): ${errorText}`);
+      if (error) {
+        toast.error(error.message || "Failed to create account.");
+        setSubmitting(false);
       }
-
-      toast.success("Account created! Please sign in.");
-      router.push("/sign-in");
     } catch (error) {
       console.error("Sign up failed:", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to create account."
-      );
-    } finally {
+      toast.error("An unexpected error occurred. Please try again.");
       setSubmitting(false);
     }
   }
 
+  async function handleGoogleSignUp() {
+    try {
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+      });
+    } catch (error) {
+      console.error("Google sign-up failed:", error);
+      toast.error("Failed to sign up with Google.");
+    }
+  }
+
   return (
-    <div className="bg-[#f4f9fb] px-6 py-16">
-      <div className="mx-auto max-w-md">
+    <div className="bg-[#f4f9fb] px-6 py-16 min-h-screen flex items-center justify-center">
+      <div className="mx-auto max-w-md w-full">
         <h1 className="text-center font-serif text-4xl text-gray-900">
           Create Account
         </h1>
@@ -87,10 +110,11 @@ export default function SignUpPage() {
         </p>
 
         <form
-          className="mt-8 border border-gray-200 bg-white p-8 shadow-sm"
+          className="mt-8 border border-gray-200 bg-white p-8 shadow-sm rounded-lg"
           onSubmit={(event) => void handleSubmit(event)}
         >
           <div className="space-y-5">
+            {/* Full Name */}
             <div>
               <label
                 htmlFor="fullName"
@@ -103,6 +127,7 @@ export default function SignUpPage() {
                 <Input
                   id="fullName"
                   required
+                  disabled={submitting}
                   value={form.fullName}
                   onChange={(e) => update("fullName", e.target.value)}
                   placeholder="Enter your name"
@@ -111,6 +136,7 @@ export default function SignUpPage() {
               </div>
             </div>
 
+            {/* Email Address */}
             <div>
               <label
                 htmlFor="email"
@@ -124,6 +150,7 @@ export default function SignUpPage() {
                   id="email"
                   required
                   type="email"
+                  disabled={submitting}
                   value={form.email}
                   onChange={(e) => update("email", e.target.value)}
                   placeholder="Enter your email"
@@ -132,6 +159,7 @@ export default function SignUpPage() {
               </div>
             </div>
 
+            {/* Password */}
             <div>
               <label
                 htmlFor="password"
@@ -144,15 +172,25 @@ export default function SignUpPage() {
                 <Input
                   id="password"
                   required
-                  type="password"
+                  type={showPassword ? "text" : "password"}
+                  disabled={submitting}
                   value={form.password}
                   onChange={(e) => update("password", e.target.value)}
-                  placeholder="Create a password"
+                  placeholder="Create a password (min 8 chars)"
                   className={inputClasses}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute top-1/2 right-3 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <LuEyeOff className="size-4" /> : <LuEye className="size-4" />}
+                </button>
               </div>
             </div>
 
+            {/* Confirm Password */}
             <div>
               <label
                 htmlFor="confirmPassword"
@@ -165,31 +203,44 @@ export default function SignUpPage() {
                 <Input
                   id="confirmPassword"
                   required
-                  type="password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  disabled={submitting}
                   value={form.confirmPassword}
                   onChange={(e) => update("confirmPassword", e.target.value)}
                   placeholder="Confirm your password"
                   className={inputClasses}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute top-1/2 right-3 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                  tabIndex={-1}
+                >
+                  {showConfirmPassword ? <LuEyeOff className="size-4" /> : <LuEye className="size-4" />}
+                </button>
               </div>
             </div>
 
+            {/* Submit Button */}
             <button
               type="submit"
               disabled={submitting}
-              className="h-10 w-full rounded-md bg-brand text-sm font-medium text-white transition-colors hover:bg-brand/90 disabled:opacity-60"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand text-sm font-medium text-white transition-colors hover:bg-brand/90 disabled:opacity-60 cursor-pointer"
             >
-              Create Account
+              {submitting && <LuLoader className="size-4 animate-spin" />}
+              {submitting ? "Creating account..." : "Create Account"}
             </button>
 
             <p className="pt-1 text-center text-xs text-gray-500">
               Or sign up with
             </p>
 
+            {/* Google OAuth Button */}
             <button
               type="button"
-              onClick={() => toast.info("Google sign-up is coming soon.")}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50"
+              disabled={submitting}
+              onClick={() => void handleGoogleSignUp()}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 disabled:opacity-60 cursor-pointer"
             >
               <FaGoogle className="size-4 text-gray-700" />
               Sign Up With Google

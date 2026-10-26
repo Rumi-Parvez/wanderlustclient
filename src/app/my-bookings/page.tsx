@@ -1,131 +1,199 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { LuClock, LuEye, LuTrash2 } from "react-icons/lu";
+import { LuLoader } from "react-icons/lu";
 import { toast } from "react-toastify";
 
-import {
-  cancelBooking,
-  formatDeparture,
-  getBookings,
-  type Booking,
-} from "@/lib/bookings";
+import BookingCard from "../my-bookings/BookingCard";
+import { authClient } from "@/lib/auth-client";
 
-
+import type {
+  ApiBooking,
+  Booking,
+  BookingsResponse,
+} from "../types/booking";
 
 export default function MyBookingsPage() {
+  const { data: session, isPending: sessionLoading } =
+    authClient.useSession();
+
   const router = useRouter();
-  const [bookings, setBookings] = useState<Booking[] | null>(null);
+
+  const email = session?.user?.email;
+  const apiUrl = process.env.NEXT_PUBLIC_SERVER?.replace(/\/+$/, "");
+
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (sessionLoading) return;
 
-    const frame = requestAnimationFrame(() => {
-      setBookings(getBookings());
-    });
-    return () => cancelAnimationFrame(frame);
-  }, []);
+    if (!email) {
+      router.push("/sign-in");
+      return;
+    }
 
-  function handleCancel(bookingId: string) {
-    if (!window.confirm("Cancel this booking?")) return;
-    cancelBooking(bookingId);
-    setBookings(getBookings());
-    toast.error("Booking cancelled!");
+    let cancelled = false;
+
+    async function fetchBookings() {
+      try {
+        // Keep state updates in the asynchronous operation.
+        await Promise.resolve();
+
+        if (!apiUrl) {
+          throw new Error("Server URL is missing!");
+        }
+
+        const response = await fetch(
+          `${apiUrl}/bookings/${email}`,
+          {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+            },
+            cache: "no-store",
+          }
+        );
+
+        const contentType = response.headers.get("content-type") || "";
+        const responseText = await response.text();
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to fetch bookings (${response.status}): ${responseText.slice(0, 200)}`
+          );
+        }
+
+        if (!contentType.includes("application/json")) {
+          throw new Error(
+            "Backend did not return JSON. Check your API route."
+          );
+        }
+
+        const data: unknown = JSON.parse(responseText);
+
+        let bookingList: ApiBooking[] = [];
+
+        if (Array.isArray(data)) {
+          bookingList = data as ApiBooking[];
+        } else if (data && typeof data === "object") {
+          const result = data as BookingsResponse;
+
+          if (result.success === false) {
+            throw new Error(
+              result.message || "Failed to load bookings."
+            );
+          }
+
+          if (Array.isArray(result.bookings)) {
+            bookingList = result.bookings;
+          }
+        }
+
+        const formattedBookings: Booking[] = bookingList
+          .filter((item) => Boolean(item._id || item.bookingId))
+          .map((item) => {
+            const id = String(item._id ?? item.bookingId);
+
+            return {
+              _id: id,
+              bookingId: String(item.bookingId ?? id),
+              destinationId: String(item.destinationId ?? ""),
+              name: item.name ?? "Unknown destination",
+              country: item.country ?? "",
+              price: Number(item.price ?? 0),
+              duration: item.duration ?? "",
+              departureDate: String(
+                item.bookingDate ?? item.departureDate ?? ""
+              ),
+              imageUrl: item.imageUrl ?? "",
+              status: item.status ?? "Confirmed",
+            };
+          });
+
+        if (!cancelled) {
+          setBookings(formattedBookings);
+        }
+      } catch (error) {
+        console.error("Fetch bookings error:", error);
+
+        if (!cancelled) {
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to load your bookings."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void fetchBookings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionLoading, email, apiUrl, router]);
+
+  function handleBookingDeleted(bookingId: string) {
+    setBookings((previous) =>
+      previous.filter((booking) => booking._id !== bookingId)
+    );
+  }
+
+  if (sessionLoading || (loading && Boolean(email))) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-white">
+        <LuLoader className="size-8 animate-spin text-brand" />
+      </div>
+    );
+  }
+
+  if (!email) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-white">
+        <LuLoader className="size-8 animate-spin text-brand" />
+      </div>
+    );
   }
 
   return (
-    <div className="bg-white px-6 pt-10 pb-16 md:px-10">
+    <div className="min-h-screen bg-white px-6 pt-10 pb-16 md:px-10">
       <div className="mx-auto max-w-6xl">
-        <h1 className="font-serif text-4xl text-gray-900">My Bookings</h1>
+        <h1 className="font-serif text-4xl text-gray-900">
+          My Bookings
+        </h1>
+
         <p className="mt-2 text-sm text-gray-500">
-          Manage and view your upcoming travel plans
+          Manage and view your upcoming travel plans for{" "}
+          <span className="font-medium text-gray-800">{email}</span>
         </p>
 
         <div className="mt-8 space-y-4">
-          {bookings?.length === 0 && (
-            <div className="border border-gray-200 bg-gray-50 py-16 text-center text-sm text-gray-500">
+          {bookings.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 py-16 text-center text-sm text-gray-500">
               You have no bookings yet.{" "}
               <button
                 type="button"
                 onClick={() => router.push("/all-destinations")}
-                className="font-medium text-brand hover:underline"
+                className="cursor-pointer font-medium text-brand hover:underline"
               >
                 Browse destinations
               </button>
             </div>
+          ) : (
+            bookings.map((booking) => (
+              <BookingCard
+                key={booking._id}
+                booking={booking}
+                onDeleted={handleBookingDeleted}
+              />
+            ))
           )}
-
-          {bookings?.map((booking) => (
-            <div
-              key={booking.bookingId}
-              className="flex items-center gap-5 border border-gray-200 bg-white p-4 max-md:flex-col md:pl-4"
-            >
-              <div className="relative h-28 w-48 shrink-0 max-md:w-full">
-                <Image
-                  src={booking.imageUrl || "/images/CTA.png"}
-                  alt={booking.name}
-                  fill
-                  sizes="192px"
-                  unoptimized
-                  className="object-cover"
-                />
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <span
-                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                    booking.status === "Confirmed"
-                      ? "bg-emerald-50 text-emerald-600"
-                      : "bg-amber-50 text-amber-600"
-                  }`}
-                >
-                  {booking.status === "Confirmed" ? (
-                    <LuClock className="size-3" />
-                  ) : (
-                    <LuClock className="size-3" />
-                  )}
-                  {booking.status}
-                </span>
-
-                <h3 className="mt-1.5 text-lg font-semibold text-gray-900">
-                  {booking.name}
-                </h3>
-
-                <p className="mt-1.5 text-xs text-gray-500">
-                  Departure: {formatDeparture(booking.departureDate)}
-                </p>
-                <p className="mt-0.5 text-xs text-gray-500">
-                  Booking ID: {booking.bookingId}
-                </p>
-
-                <p className="mt-2 text-xl font-bold text-gray-900">
-                  ${booking.price}
-                </p>
-              </div>
-
-              <div className="flex shrink-0 items-center gap-3 max-md:w-full md:self-start">
-                <button
-                  type="button"
-                  onClick={() => handleCancel(booking.bookingId)}
-                  className="flex h-8 items-center gap-1.5 rounded-md border border-red-300 bg-white px-3 text-xs font-medium text-red-500 transition-colors hover:bg-red-50"
-                >
-                  <LuTrash2 className="size-3.5" />
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    router.push(`/all-destinations/${booking.destinationId}`)
-                  }
-                  className="flex h-8 items-center gap-1.5 rounded-md border border-sky-200 bg-white px-3 text-xs font-medium text-sky-600 transition-colors hover:bg-sky-50"
-                >
-                  <LuEye className="size-3.5" />
-                  View
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </div>
